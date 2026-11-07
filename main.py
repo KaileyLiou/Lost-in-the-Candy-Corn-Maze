@@ -232,3 +232,145 @@ class Ghost:
                 self.path = astar(grid, self.pos, self.target)
                 if self.path:
                     return
+
+class Boss:
+    PRESETS = {
+        "Easy":   {"label": "Sleepy", "wa": 40,  "wb": 8, "replan": 2.0, "step": 0.40},
+        "Normal": {"label": "Grumpy", "wa": 100, "wb": 5, "replan": 1.0, "step": 0.30},
+        "Hard":   {"label": "Sneaky", "wa": 150, "wb": 3, "replan": 0.5, "step": 0.22},
+    }
+
+    def __init__(self, col, row, difficulty):
+        self.col = col
+        self.row = row
+        self.preset = self.PRESETS[difficulty]
+        self.path = []
+        self.target = None
+        self.mode = "CHASE"
+        self.candidates = []
+        self.chosen = None
+        self.chosen_util = 0.0
+        self.replan_timer = 0.0
+        self.move_timer = 0.0
+
+    @property
+    def pos(self):
+        return (self.col, self.row)
+
+    def update(self, dt, player_pos, markov, grid):
+        self.replan_timer -= dt
+        if self.replan_timer <= 0:
+            self.replan(player_pos, markov, grid)
+            self.replan_timer = self.preset["replan"]
+
+        self.move_timer += dt
+        if self.move_timer >= self.preset["step"] and self.path:
+            self.move_timer = 0
+            self.col, self.row = self.path.pop(0)
+
+    def replan(self, player_pos, markov, grid):
+        wa, wb = self.preset["wa"], self.preset["wb"]
+        ranked = markov.ranked()
+
+        found = {}
+        if ranked:
+            top_dir, top_p = ranked[0]
+            for steps in (2, 3):
+                cell = walk_ahead(grid, player_pos, top_dir, steps)
+                if cell != player_pos:
+                    found[cell] = (top_p, top_dir)
+            if len(ranked) > 1:
+                second_dir, second_p = ranked[1]
+                cell = walk_ahead(grid, player_pos, second_dir, 3)
+                if cell != player_pos and cell not in found:
+                    found[cell] = (second_p, second_dir)
+
+        self.candidates = []
+        for cell, (prob, direction) in found.items():
+            path = astar(grid, self.pos, cell)
+            dist = len(path)
+            util = wa * prob - wb * dist
+            self.candidates.append({
+                "cell": cell, "prob": prob, "dir": direction,
+                "dist": dist, "util": util, "path": path,
+            })
+
+        best = max(self.candidates, key=lambda c: c["util"], default=None)
+        if best is not None and best["util"] > 0:
+            self.mode = "AMBUSH"
+            self.target = best["cell"]
+            self.path = best["path"]
+            self.chosen = best["cell"]
+            self.chosen_util = best["util"]
+        else:
+            self.mode = "CHASE"
+            self.target = player_pos
+            self.path = astar(grid, self.pos, player_pos)
+            self.chosen = None
+            self.chosen_util = 0.0
+
+def center(col, row):
+    return (col * CELL + CELL // 2, row * CELL + CELL // 2)
+
+def random_far_cell(from_pos, min_dist):
+    while True:
+        c, r = random.randint(0, COLS - 1), random.randint(0, ROWS - 1)
+        if manhattan((c, r), from_pos) >= min_dist:
+            return (c, r)
+
+def spawn_items(settings, exit_pos):
+    used = {(0, 0), exit_pos}
+    result = {}
+    for name in ["candy", "cocoa", "spider", "cobweb"]:
+        cells = set()
+        for r in range(ROWS):
+            for c in range(COLS):
+                if (c, r) in used:
+                    continue
+                if random.random() < settings[name]:
+                    cells.add((c, r))
+        used |= cells
+        result[name] = cells
+    if not result["candy"]:
+        while True:
+            c, r = random.randint(0, COLS - 1), random.randint(0, ROWS - 1)
+            if (c, r) not in used:
+                result["candy"].add((c, r))
+                for name in ["cocoa", "spider", "cobweb"]:
+                    result[name].discard((c, r))
+                break
+    return result
+
+ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+
+SPRITE_SIZES = {"player": 38, "ghost": 38, "boss": 44, "candy": 30,
+                "cocoa": 30, "spider": 28, "cobweb": 32, "gate": 44}
+
+def load_sprites():
+    base = ASSET_DIR
+    sprites = {}
+    for name in ["player", "ghost", "boss", "candy", "cocoa", "spider", "cobweb", "gate"]:
+        path = os.path.join(base, name + ".png")
+        if os.path.exists(path):
+            img = pygame.image.load(path).convert_alpha()
+            size = SPRITE_SIZES[name]
+            sprites[name] = pygame.transform.smoothscale(img, (size, size))
+    return sprites
+
+SOUND_NAMES = ["candy", "cocoa", "hurt", "web", "boo", "ambush", "win", "lose"]
+
+def load_sounds():
+    sounds = {}
+    try:
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+    except pygame.error:
+        return sounds
+    for name in SOUND_NAMES:
+        path = os.path.join(ASSET_DIR, name + ".ogg")
+        if os.path.exists(path):
+            try:
+                sounds[name] = pygame.mixer.Sound(path)
+            except pygame.error:
+                print(f"Could not load {name}.ogg")
+    return sounds
