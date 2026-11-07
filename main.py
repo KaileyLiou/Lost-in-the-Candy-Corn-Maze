@@ -1,16 +1,41 @@
+import heapq
+import os
 import random
 import pygame
 
-COLS, ROWS, CELL = 15, 15, 40
-WIDTH, HEIGHT = COLS * CELL, ROWS * CELL
+COLS, ROWS, CELL = 15, 15, 44
+MAZE_W, MAZE_H = COLS * CELL, ROWS * CELL
+PANEL_W = 280
+WIDTH, HEIGHT = MAZE_W + PANEL_W, MAZE_H
 
-BG = (40, 20, 60) # purple
-FLOOR = (250, 240, 215) # cream
-WALL = (230, 140, 30) # orange
-PLAYER = (255, 120, 0)
+MOVE_DELAY = 0.13
+
+BG = (40, 20, 60)
+PANEL_BG = (28, 14, 42)
+FLOOR = (250, 240, 215)
+WALL = (230, 140, 30)
+GOLD = (255, 215, 90)
+WHITE = (255, 255, 255)
+CANDY_COLOR = (230, 50, 120)
+COCOA_COLOR = (120, 70, 30)
+SPIDER_COLOR = (30, 30, 30)
+WEB_COLOR = (170, 170, 185)
+PLAYER_COLOR = (255, 120, 0)
+BOSS_COLOR = (120, 60, 160)
+GATE_CLOSED = (120, 120, 120)
+GATE_OPEN = (60, 200, 90)
+DEBUG_GHOST = (60, 220, 60)
+DEBUG_BOSS = (255, 60, 160)
+DEBUG_PRED = (0, 200, 255)
 
 DIRS = {"N": (0, -1), "S": (0, 1), "E": (1, 0), "W": (-1, 0)}
 OPPOSITE = {"N": "S", "S": "N", "E": "W", "W": "E"}
+DIR_NAMES = {"N": "UP", "S": "DOWN", "W": "LEFT", "E": "RIGHT"}
+
+DEFAULT_SETTINGS = {
+    "candy": 0.06, "cocoa": 0.02, "spider": 0.03, "cobweb": 0.04,
+    "difficulty": "Normal",
+}
 
 class Cell:
     def __init__(self, col, row):
@@ -21,20 +46,16 @@ class Cell:
 
 def generate_maze():
     grid = [[Cell(c, r) for c in range(COLS)] for r in range(ROWS)]
-
     start = grid[0][0]
     start.visited = True
     stack = [start]
-
     while stack:
         current = stack[-1]
-
         neighbors = []
         for d, (dc, dr) in DIRS.items():
             nc, nr = current.col + dc, current.row + dr
             if 0 <= nc < COLS and 0 <= nr < ROWS and not grid[nr][nc].visited:
                 neighbors.append((d, grid[nr][nc]))
-
         if neighbors:
             d, nxt = random.choice(neighbors)
             current.walls[d] = False
@@ -42,74 +63,51 @@ def generate_maze():
             nxt.visited = True
             stack.append(nxt)
         else:
-            stack.pop()  # backtrack
-
+            stack.pop()
     return grid
 
-def draw_maze(screen, grid):
-    screen.fill(BG)
-    for row in grid:
-        for cell in row:
-            x, y = cell.col * CELL, cell.row * CELL
-            pygame.draw.rect(screen, FLOOR, (x, y, CELL, CELL))
-            if cell.walls["N"]:
-                pygame.draw.line(screen, WALL, (x, y), (x + CELL, y), 3)
-            if cell.walls["S"]:
-                pygame.draw.line(screen, WALL, (x, y + CELL), (x + CELL, y + CELL), 3)
-            if cell.walls["W"]:
-                pygame.draw.line(screen, WALL, (x, y), (x, y + CELL), 3)
-            if cell.walls["E"]:
-                pygame.draw.line(screen, WALL, (x + CELL, y), (x + CELL, y + CELL), 3)
+def walk_ahead(grid, start, direction, steps):
+    col, row = start
+    dc, dr = DIRS[direction]
+    for _ in range(steps):
+        if grid[row][col].walls[direction]:
+            break
+        col += dc
+        row += dr
+    return (col, row)
 
-class Player:
-    def __init__(self):
-        self.col = 0
-        self.row = 0
+def manhattan(a, b):
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-    def try_move(self, direction, grid):
-        if not grid[self.row][self.col].walls[direction]:
-            dc, dr = DIRS[direction]
-            self.col += dc
-            self.row += dr
+def astar(grid, start, goal):
+    open_heap = [(manhattan(start, goal), 0, start)]
+    g_cost = {start: 0}
+    parent = {start: None}
+    closed = set()
 
-    def draw(self, screen):
-        cx = self.col * CELL + CELL // 2
-        cy = self.row * CELL + CELL // 2
-        pygame.draw.circle(screen, PLAYER, (cx, cy), CELL // 3)
+    while open_heap:
+        f, g, current = heapq.heappop(open_heap)
+        if current == goal:
+            path = []
+            node = goal
+            while node != start:
+                path.append(node)
+                node = parent[node]
+            path.reverse()
+            return path
+        if current in closed:
+            continue
+        closed.add(current)
 
-def main():
-    pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Lost in the Candy Corn Maze")
-    clock = pygame.time.Clock()
+        cell = grid[current[1]][current[0]]
+        for d, (dc, dr) in DIRS.items():
+            if cell.walls[d]:
+                continue
+            nxt = (current[0] + dc, current[1] + dr)
+            new_g = g + 1
+            if nxt not in g_cost or new_g < g_cost[nxt]:
+                g_cost[nxt] = new_g
+                parent[nxt] = current
+                heapq.heappush(open_heap, (new_g + manhattan(nxt, goal), new_g, nxt))
+    return []
 
-    grid = generate_maze()
-    player = Player()
-
-    keymap = {
-        pygame.K_w: "N", pygame.K_UP: "N",
-        pygame.K_s: "S", pygame.K_DOWN: "S",
-        pygame.K_a: "W", pygame.K_LEFT: "W",
-        pygame.K_d: "E", pygame.K_RIGHT: "E",
-    }
-
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-                elif event.key in keymap:
-                    player.try_move(keymap[event.key], grid)
-
-        draw_maze(screen, grid)
-        player.draw(screen)
-        pygame.display.flip()
-        clock.tick(60)
-
-    pygame.quit()
-
-if __name__ == "__main__":
-    main()
