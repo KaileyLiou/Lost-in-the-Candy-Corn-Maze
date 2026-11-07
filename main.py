@@ -374,3 +374,178 @@ def load_sounds():
             except pygame.error:
                 print(f"Could not load {name}.ogg")
     return sounds
+
+class Game:
+    MENU_ITEMS = [
+        ("Candy chance", "candy"),
+        ("Warm cocoa chance", "cocoa"),
+        ("Spider chance", "spider"),
+        ("Cobweb chance", "cobweb"),
+        ("Boss difficulty", "difficulty"),
+    ]
+
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Lost in the Candy Corn Maze")
+        self.clock = pygame.time.Clock()
+        self.sprites = load_sprites()
+        self.sounds = load_sounds()
+        self.font = pygame.font.SysFont(None, 22)
+        self.small_font = pygame.font.SysFont(None, 18)
+        self.med_font = pygame.font.SysFont(None, 30)
+        self.big_font = pygame.font.SysFont(None, 64)
+
+        self.keymap = {
+            pygame.K_w: "N", pygame.K_UP: "N",
+            pygame.K_s: "S", pygame.K_DOWN: "S",
+            pygame.K_a: "W", pygame.K_LEFT: "W",
+            pygame.K_d: "E", pygame.K_RIGHT: "E",
+        }
+        self.settings = dict(DEFAULT_SETTINGS)
+        self.menu_index = 0
+        self.debug = False
+        self.state = "menu"
+        self.end_reason = ""
+
+    def start_game(self):
+        self.grid = generate_maze()
+        self.exit_pos = (COLS - 1, ROWS - 1)
+        self.player = Player()
+        self.markov = MarkovPredictor()
+
+        items = spawn_items(self.settings, self.exit_pos)
+        self.candy = items["candy"]
+        self.cocoa = items["cocoa"]
+        self.spiders = items["spider"]
+        self.webs = items["cobweb"]
+
+        self.ghosts = []
+        for _ in range(2):
+            c, r = random_far_cell(self.player.pos, 8)
+            self.ghosts.append(Ghost(c, r))
+        bc, br = random_far_cell(self.player.pos, 10)
+        self.boss = Boss(bc, br, self.settings["difficulty"])
+
+        self.invincible = 0.0
+        self.ambush_cd = 0.0
+        self.end_reason = ""
+        self.state = "play"
+
+        music = os.path.join(ASSET_DIR, "music.ogg")
+        if pygame.mixer.get_init() and os.path.exists(music):
+            try:
+                pygame.mixer.music.load(music)
+                pygame.mixer.music.set_volume(0.3)
+                pygame.mixer.music.play(-1)
+            except pygame.error:
+                print("Could not load music.ogg")
+
+    def play(self, name):
+        if name in self.sounds:
+            self.sounds[name].play()
+
+    def finish(self, result, reason):
+        self.state = result
+        self.end_reason = reason
+        if pygame.mixer.get_init():
+            pygame.mixer.music.stop()
+        self.play(result)
+
+    def handle_event(self, event):
+        if event.type != pygame.KEYDOWN:
+            return True
+        if event.key == pygame.K_ESCAPE:
+            return False
+
+        if self.state == "menu":
+            self.menu_event(event.key)
+        else:
+            if event.key == pygame.K_TAB:
+                self.debug = not self.debug
+            if event.key == pygame.K_r and self.state in ("win", "lose"):
+                self.state = "menu"
+        return True
+
+    def menu_event(self, key):
+        if key in (pygame.K_UP, pygame.K_w):
+            self.menu_index = (self.menu_index - 1) % len(self.MENU_ITEMS)
+        elif key in (pygame.K_DOWN, pygame.K_s):
+            self.menu_index = (self.menu_index + 1) % len(self.MENU_ITEMS)
+        elif key in (pygame.K_LEFT, pygame.K_a):
+            self.change_setting(-1)
+        elif key in (pygame.K_RIGHT, pygame.K_d):
+            self.change_setting(+1)
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+            self.start_game()
+
+    def change_setting(self, direction):
+        key = self.MENU_ITEMS[self.menu_index][1]
+        if key == "difficulty":
+            names = list(Boss.PRESETS.keys())
+            i = (names.index(self.settings[key]) + direction) % len(names)
+            self.settings[key] = names[i]
+        else:
+            value = self.settings[key] + 0.02 * direction
+            self.settings[key] = round(max(0.0, min(0.30, value)), 2)
+
+    def update(self, dt):
+        if self.state != "play":
+            return
+        p = self.player
+        self.invincible = max(0.0, self.invincible - dt)
+        self.ambush_cd = max(0.0, self.ambush_cd - dt)
+        p.slow_timer = max(0.0, p.slow_timer - dt)
+        p.move_cd -= dt
+
+        if p.move_cd <= 0:
+            keys = pygame.key.get_pressed()
+            for key, d in self.keymap.items():
+                if keys[key]:
+                    if p.try_move(d, self.grid):
+                        self.markov.record(d)
+                        self.enter_cell()
+                        p.move_cd = MOVE_DELAY * (2 if p.slow_timer > 0 else 1)
+                    break
+
+        for g in self.ghosts:
+            before = g.state
+            g.update(dt, p.pos, self.grid)
+            if before != g.CHASE and g.state == g.CHASE:
+                self.play("boo")
+            if g.pos == p.pos and self.invincible == 0:
+                p.health -= 10
+                self.invincible = 1.5
+                self.play("hurt")
+
+        before = self.boss.mode
+        self.boss.update(dt, p.pos, self.markov, self.grid)
+        if before != "AMBUSH" and self.boss.mode == "AMBUSH" and self.ambush_cd == 0:
+            self.play("ambush")
+            self.ambush_cd = 5.0
+
+        if self.boss.pos == p.pos:
+            self.finish("lose", "The scarecrow caught you!")
+        elif p.health <= 0:
+            self.finish("lose", "You ran out of health.")
+        elif p.pos == self.exit_pos and not self.candy:
+            self.finish("win", f"Final score: {p.score}")
+
+    def enter_cell(self):
+        p = self.player
+        pos = p.pos
+        if pos in self.candy:
+            self.candy.remove(pos)
+            p.score += 10
+            self.play("candy")
+        if pos in self.cocoa:
+            self.cocoa.remove(pos)
+            p.health = min(100, p.health + 25)
+            self.play("cocoa")
+        if pos in self.spiders:
+            p.health -= 20
+            self.play("hurt")
+        if pos in self.webs:
+            p.slow_timer = 2.0
+            self.play("web")
+
