@@ -2,6 +2,11 @@
 
 A Halloween maze game made with Python and Pygame for A.I. for Game Programming. The player is a pumpkin trick-or-treater who got lost in a cornfield maze. The goal is to grab all the candy and get out through the gate before the ghosts and the scarecrow catch you.
 
+<img width="465" height="322" alt="Screenshot 2026-11-07 at 6 48 03 PM" src="https://github.com/user-attachments/assets/11c3c539-8b4e-4ca8-9fe8-c6beb49614ba" />
+<img width="465" height="322" alt="Screenshot 2026-11-07 at 6 48 31 PM" src="https://github.com/user-attachments/assets/f64d98f4-1a20-4429-b277-02d0e8480a4e" />
+<img width="465" height="322" alt="Screenshot 2026-11-07 at 6 48 41 PM" src="https://github.com/user-attachments/assets/8acff110-1efd-429f-953b-8d09d24025a2" />
+<img width="465" height="322" alt="Screenshot 2026-11-07 at 6 51 12 PM" src="https://github.com/user-attachments/assets/e4ed12b8-4f21-4616-ba11-b0d2db8df147" />
+
 ## Controls
 
 - **WASD or arrow keys:** move (hold to keep walking)
