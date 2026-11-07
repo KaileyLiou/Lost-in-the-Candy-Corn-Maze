@@ -549,3 +549,228 @@ class Game:
             p.slow_timer = 2.0
             self.play("web")
 
+    def draw(self):
+        if self.state == "menu":
+            self.draw_menu()
+        else:
+            self.draw_game()
+        pygame.display.flip()
+
+    def draw_thing(self, name, pos, color, radius, ring=None):
+        cx, cy = center(*pos)
+        if ring:
+            pygame.draw.circle(self.screen, ring, (cx, cy), CELL // 2 - 2, 3)
+        if name in self.sprites:
+            img = self.sprites[name]
+            self.screen.blit(img, img.get_rect(center=(cx, cy)))
+        else:
+            pygame.draw.circle(self.screen, color, (cx, cy), radius)
+
+    def draw_game(self):
+        self.screen.fill(BG)
+        for row in self.grid:
+            for cell in row:
+                x, y = cell.col * CELL, cell.row * CELL
+                pygame.draw.rect(self.screen, FLOOR, (x, y, CELL, CELL))
+                if cell.walls["N"]:
+                    pygame.draw.line(self.screen, WALL, (x, y), (x + CELL, y), 3)
+                if cell.walls["S"]:
+                    pygame.draw.line(self.screen, WALL, (x, y + CELL), (x + CELL, y + CELL), 3)
+                if cell.walls["W"]:
+                    pygame.draw.line(self.screen, WALL, (x, y), (x, y + CELL), 3)
+                if cell.walls["E"]:
+                    pygame.draw.line(self.screen, WALL, (x + CELL, y), (x + CELL, y + CELL), 3)
+
+        if "gate" in self.sprites:
+            img = self.sprites["gate"].copy()
+            if self.candy:
+                img.set_alpha(110)
+            self.screen.blit(img, img.get_rect(center=center(*self.exit_pos)))
+        else:
+            gate_color = GATE_OPEN if not self.candy else GATE_CLOSED
+            gx, gy = self.exit_pos[0] * CELL, self.exit_pos[1] * CELL
+            pygame.draw.rect(self.screen, gate_color, (gx + 6, gy + 6, CELL - 12, CELL - 12))
+
+        for pos in self.webs:
+            self.draw_thing("cobweb", pos, WEB_COLOR, CELL // 3)
+        for pos in self.spiders:
+            self.draw_thing("spider", pos, SPIDER_COLOR, CELL // 5)
+        for pos in self.cocoa:
+            self.draw_thing("cocoa", pos, COCOA_COLOR, CELL // 5)
+        for pos in self.candy:
+            self.draw_thing("candy", pos, CANDY_COLOR, CELL // 6)
+
+        for g in self.ghosts:
+            self.draw_thing("ghost", g.pos, g.COLORS[g.state], CELL // 3, ring=g.COLORS[g.state])
+        self.draw_thing("boss", self.boss.pos, BOSS_COLOR, CELL // 2 - 4)
+        self.draw_thing("player", self.player.pos, PLAYER_COLOR, CELL // 3)
+
+        if self.debug:
+            self.draw_debug_overlay()
+        self.draw_panel()
+
+        if self.state in ("win", "lose"):
+            self.draw_end_overlay()
+
+    def draw_debug_overlay(self):
+        for g in self.ghosts:
+            points = [center(*g.pos)] + [center(c, r) for c, r in g.path]
+            if len(points) >= 2:
+                pygame.draw.lines(self.screen, DEBUG_GHOST, False, points, 2)
+            if g.target:
+                pygame.draw.circle(self.screen, DEBUG_GHOST, center(*g.target), 8, 2)
+            self.label(f"{g.state} -> {g.target}", g.pos)
+
+        b = self.boss
+        for cand in b.candidates:
+            tile = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+            tile.fill((255, 230, 0, 110))
+            cx, cy = cand["cell"]
+            self.screen.blit(tile, (cx * CELL, cy * CELL))
+            if cand["cell"] == b.chosen:
+                pygame.draw.rect(self.screen, (255, 140, 0),
+                                 (cx * CELL, cy * CELL, CELL, CELL), 3)
+            text = self.small_font.render(f"{cand['util']:.0f}", True, (0, 0, 0))
+            self.screen.blit(text, text.get_rect(center=center(cx, cy)))
+
+        points = [center(*b.pos)] + [center(c, r) for c, r in b.path]
+        if len(points) >= 2:
+            pygame.draw.lines(self.screen, DEBUG_BOSS, False, points, 3)
+        if b.target:
+            pygame.draw.circle(self.screen, DEBUG_BOSS, center(*b.target), 9, 3)
+        self.label(f"{b.mode} -> {b.target}", b.pos)
+
+        ranked = self.markov.ranked()
+        if ranked:
+            d = ranked[0][0]
+            px, py = center(*self.player.pos)
+            dc, dr = DIRS[d]
+            pygame.draw.line(self.screen, DEBUG_PRED, (px, py),
+                             (px + dc * CELL, py + dr * CELL), 4)
+
+    def label(self, text, pos):
+        img = self.small_font.render(text, True, (0, 0, 0))
+        x, y = center(*pos)
+        bg = img.get_rect(center=(x, y - CELL // 2 - 4)).inflate(6, 2)
+        pygame.draw.rect(self.screen, (255, 255, 255), bg)
+        self.screen.blit(img, img.get_rect(center=bg.center))
+
+    def draw_panel(self):
+        pygame.draw.rect(self.screen, PANEL_BG, (MAZE_W, 0, PANEL_W, HEIGHT))
+        x, y = MAZE_W + 14, 14
+
+        def line(text, color=WHITE, font=None, gap=24):
+            nonlocal y
+            img = (font or self.font).render(text, True, color)
+            self.screen.blit(img, (x, y))
+            y += gap
+
+        p = self.player
+        line("Candy Corn Maze", GOLD, self.med_font, 34)
+        line(f"HP: {p.health}")
+        line(f"Score: {p.score}")
+        line(f"Candy left: {len(self.candy)}")
+        if p.slow_timer > 0:
+            line("Stuck in a cobweb!", (200, 200, 255))
+        y += 6
+        line("Tab = AI debug   Esc = quit", (190, 170, 210), self.small_font, 28)
+
+        if not self.debug:
+            return
+
+        pygame.draw.line(self.screen, GOLD, (x, y), (x + PANEL_W - 28, y), 1)
+        y += 10
+        line("[DEBUG PANEL]", GOLD, self.med_font, 28)
+
+        ranked = self.markov.ranked()
+        if ranked:
+            line(f"Prediction: {DIR_NAMES[ranked[0][0]]} ({ranked[0][1] * 100:.0f}%)")
+        else:
+            line("Prediction: none yet")
+        line(f"Markov accuracy: {self.markov.accuracy():.1f}%")
+        line(f"Transitions: {self.markov.total}")
+        y += 4
+
+        line("Matrix (from \\ to)  U  D  L  R", (190, 170, 210), self.small_font, 20)
+        for a in MarkovPredictor.ORDER:
+            row = self.markov.counts[a]
+            nums = "".join(f"{row[b]:>4}" for b in MarkovPredictor.ORDER)
+            line(f"{DIR_NAMES[a]:<6}{nums}", WHITE, self.small_font, 20)
+        y += 6
+
+        b = self.boss
+        line(f"Boss: {b.preset['label']}", DEBUG_BOSS)
+        line(f"Mode: {b.mode} -> {b.target}")
+        line(f"Path nodes: {len(b.path)}   Replan: {max(0, b.replan_timer):.1f}s")
+        line(f"Utility = {b.preset['wa']}*prob - {b.preset['wb']}*dist",
+             WHITE, self.small_font, 20)
+        for cand in b.candidates:
+            mark = "*" if cand["cell"] == b.chosen else " "
+            line(f"{mark}{cand['cell']} p={cand['prob'] * 100:.0f}% "
+                 f"d={cand['dist']} u={cand['util']:.0f}", WHITE, self.small_font, 18)
+        y += 6
+        for i, g in enumerate(self.ghosts, 1):
+            line(f"Ghost {i}: {g.state} ({len(g.path)} nodes)", DEBUG_GHOST, self.small_font, 20)
+
+    def draw_end_overlay(self):
+        overlay = pygame.Surface((MAZE_W, MAZE_H), pygame.SRCALPHA)
+        overlay.fill((20, 10, 30, 200))
+        self.screen.blit(overlay, (0, 0))
+        cx, cy = MAZE_W // 2, MAZE_H // 2
+        title = "YOU ESCAPED!" if self.state == "win" else "GAME OVER"
+        t1 = self.big_font.render(title, True, GOLD)
+        t2 = self.med_font.render(self.end_reason, True, WHITE)
+        t3 = self.font.render("Press R for the start screen  |  Esc to quit", True, WHITE)
+        self.screen.blit(t1, t1.get_rect(center=(cx, cy - 50)))
+        self.screen.blit(t2, t2.get_rect(center=(cx, cy + 10)))
+        self.screen.blit(t3, t3.get_rect(center=(cx, cy + 55)))
+
+    def draw_menu(self):
+        self.screen.fill(BG)
+        cx = WIDTH // 2
+        title = self.big_font.render("Lost in the Candy Corn Maze", True, GOLD)
+        self.screen.blit(title, title.get_rect(center=(cx, 90)))
+        sub = self.font.render("Choose an option and then press Enter", True, WHITE)
+        self.screen.blit(sub, sub.get_rect(center=(cx, 140)))
+
+        y = 210
+        for i, (label, key) in enumerate(self.MENU_ITEMS):
+            selected = (i == self.menu_index)
+            color = GOLD if selected else WHITE
+            if key == "difficulty":
+                value = f"{self.settings[key]}  ({Boss.PRESETS[self.settings[key]]['label']})"
+            else:
+                value = f"{round(self.settings[key] * 100)}%"
+            prefix = "> " if selected else "  "
+            left = self.med_font.render(prefix + label, True, color)
+            right = self.med_font.render(f"< {value} >", True, color)
+            self.screen.blit(left, (cx - 300, y))
+            self.screen.blit(right, (cx + 40, y))
+            y += 56
+
+        hints = [
+            "Up/Down: choose     Left/Right: change     Enter: start",
+            "In game: WASD or arrows to move (hold to keep walking)",
+            "Collect all the candy, then reach the gate. Press tab to see the AI think.",
+        ]
+        y = HEIGHT - 120
+        for h in hints:
+            img = self.font.render(h, True, (200, 180, 220))
+            self.screen.blit(img, img.get_rect(center=(cx, y)))
+            y += 28
+
+    def run(self):
+        running = True
+        while running:
+            dt = self.clock.tick(60) / 1000
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif not self.handle_event(event):
+                    running = False
+            self.update(dt)
+            self.draw()
+        pygame.quit()
+
+if __name__ == "__main__":
+    Game().run()
