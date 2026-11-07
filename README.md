@@ -38,3 +38,11 @@ On the start screen you can set the chance of candy, cocoa, spiders and cobwebs,
 - The player is faster than every enemy so the boss is only dangerous when it gets ahead of you
 - The ghosts can walk on top of each other
 - The maze is always 15x15 and there is no weighted terrain
+
+## Extension
+ 
+I added three boss difficulty settings you can pick on the start screen: sleepy, grumpy, and sneaky. The scarecrow uses the same logic in all three, but each one has different numbers for how much it trusts the prediction, how often it re-plans, and how fast it moves. Sleepy mostly just chases you, while sneaky will go a long way to cut you off.
+
+## Credits
+ 
+Art made in Canva. Sound effects from Pixabay.
