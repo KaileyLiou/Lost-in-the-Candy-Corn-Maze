@@ -111,3 +111,124 @@ def astar(grid, start, goal):
                 heapq.heappush(open_heap, (new_g + manhattan(nxt, goal), new_g, nxt))
     return []
 
+class Player:
+    def __init__(self):
+        self.col = 0
+        self.row = 0
+        self.health = 100
+        self.score = 0
+        self.slow_timer = 0.0
+        self.move_cd = 0.0
+
+    @property
+    def pos(self):
+        return (self.col, self.row)
+
+    def try_move(self, direction, grid):
+        if grid[self.row][self.col].walls[direction]:
+            return False
+        dc, dr = DIRS[direction]
+        self.col += dc
+        self.row += dr
+        return True
+
+class MarkovPredictor:
+    ORDER = ["N", "S", "W", "E"]
+
+    def __init__(self):
+        self.counts = {a: {b: 0 for b in self.ORDER} for a in self.ORDER}
+        self.last = None
+        self.total = 0
+        self.checked = 0
+        self.correct = 0
+
+    def ranked(self):
+        if self.last is None:
+            return []
+        row = self.counts[self.last]
+        total = sum(row.values())
+        if total == 0:
+            return []
+        items = [(d, row[d] / total) for d in self.ORDER if row[d] > 0]
+        items.sort(key=lambda x: -x[1])
+        return items
+
+    def record(self, direction):
+        if self.last is not None:
+            ranked = self.ranked()
+            if ranked:
+                self.checked += 1
+                if ranked[0][0] == direction:
+                    self.correct += 1
+            self.counts[self.last][direction] += 1
+            self.total += 1
+        self.last = direction
+
+    def accuracy(self):
+        return 100 * self.correct / self.checked if self.checked else 0.0
+
+class Ghost:
+    WANDER, CHASE, SEARCH = "WANDER", "CHASE", "SEARCH"
+    COLORS = {"WANDER": (255, 255, 255), "CHASE": (255, 150, 200), "SEARCH": (150, 200, 255)}
+
+    def __init__(self, col, row):
+        self.col = col
+        self.row = row
+        self.state = self.WANDER
+        self.path = []
+        self.target = None
+        self.move_timer = 0.0
+        self.repath_timer = 0.0
+        self.search_timer = 0.0
+
+    @property
+    def pos(self):
+        return (self.col, self.row)
+
+    def update(self, dt, player_pos, grid):
+        dist = manhattan(self.pos, player_pos)
+        if self.state == self.WANDER:
+            if dist <= 6:
+                self.state = self.CHASE
+                self.repath_timer = 0
+        elif self.state == self.CHASE:
+            if dist > 8:
+                self.state = self.SEARCH
+                self.search_timer = 0
+                self.target = player_pos
+                self.path = astar(grid, self.pos, self.target)
+        elif self.state == self.SEARCH:
+            self.search_timer += dt
+            if dist <= 6:
+                self.state = self.CHASE
+                self.repath_timer = 0
+            elif self.search_timer >= 3:
+                self.state = self.WANDER
+                self.path = []
+                self.target = None
+
+        if self.state == self.WANDER:
+            if not self.path:
+                self.pick_wander_target(grid)
+        elif self.state == self.CHASE:
+            self.repath_timer -= dt
+            if self.repath_timer <= 0:
+                self.target = player_pos
+                self.path = astar(grid, self.pos, self.target)
+                self.repath_timer = 0.5
+
+        step_time = 0.30 if self.state == self.CHASE else 0.50
+        self.move_timer += dt
+        if self.move_timer >= step_time and self.path:
+            self.move_timer = 0
+            self.col, self.row = self.path.pop(0)
+
+    def pick_wander_target(self, grid):
+        for _ in range(20):
+            c = max(0, min(COLS - 1, self.col + random.randint(-6, 6)))
+            r = max(0, min(ROWS - 1, self.row + random.randint(-6, 6)))
+            if (c, r) != self.pos:
+                self.target = (c, r)
+                self.path = astar(grid, self.pos, self.target)
+                if self.path:
+                    return
