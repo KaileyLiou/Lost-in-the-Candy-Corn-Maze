@@ -1,3 +1,4 @@
+import asyncio
 import heapq
 import os
 import random
@@ -341,20 +342,22 @@ def spawn_items(settings, exit_pos):
                 break
     return result
 
-ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+ASSET_DIR = "assets"
 
 SPRITE_SIZES = {"player": 38, "ghost": 38, "boss": 44, "candy": 30,
                 "cocoa": 30, "spider": 28, "cobweb": 32, "gate": 44}
 
 def load_sprites():
-    base = ASSET_DIR
     sprites = {}
     for name in ["player", "ghost", "boss", "candy", "cocoa", "spider", "cobweb", "gate"]:
-        path = os.path.join(base, name + ".png")
+        path = f"{ASSET_DIR}/{name}.png"
         if os.path.exists(path):
             img = pygame.image.load(path).convert_alpha()
             size = SPRITE_SIZES[name]
-            sprites[name] = pygame.transform.smoothscale(img, (size, size))
+            try:
+                sprites[name] = pygame.transform.smoothscale(img, (size, size))
+            except Exception:
+                sprites[name] = pygame.transform.scale(img, (size, size))
     return sprites
 
 SOUND_NAMES = ["candy", "cocoa", "hurt", "web", "boo", "ambush", "win", "lose"]
@@ -367,12 +370,14 @@ def load_sounds():
     except pygame.error:
         return sounds
     for name in SOUND_NAMES:
-        path = os.path.join(ASSET_DIR, name + ".ogg")
-        if os.path.exists(path):
-            try:
-                sounds[name] = pygame.mixer.Sound(path)
-            except pygame.error:
-                print(f"Could not load {name}.ogg")
+        for ext in ("wav", "ogg"):
+            path = f"{ASSET_DIR}/{name}.{ext}"
+            if os.path.exists(path):
+                try:
+                    sounds[name] = pygame.mixer.Sound(path)
+                except pygame.error:
+                    print(f"Could not load {path}")
+                break
     return sounds
 
 class Game:
@@ -391,10 +396,10 @@ class Game:
         self.clock = pygame.time.Clock()
         self.sprites = load_sprites()
         self.sounds = load_sounds()
-        self.font = pygame.font.SysFont(None, 22)
-        self.small_font = pygame.font.SysFont(None, 18)
-        self.med_font = pygame.font.SysFont(None, 30)
-        self.big_font = pygame.font.SysFont(None, 64)
+        self.font = pygame.font.Font(None, 22)
+        self.small_font = pygame.font.Font(None, 18)
+        self.med_font = pygame.font.Font(None, 30)
+        self.big_font = pygame.font.Font(None, 64)
 
         self.keymap = {
             pygame.K_w: "N", pygame.K_UP: "N",
@@ -432,7 +437,7 @@ class Game:
         self.end_reason = ""
         self.state = "play"
 
-        music = os.path.join(ASSET_DIR, "music.ogg")
+        music = f"{ASSET_DIR}/music.ogg"
         if pygame.mixer.get_init() and os.path.exists(music):
             try:
                 pygame.mixer.music.load(music)
@@ -461,7 +466,7 @@ class Game:
         if self.state == "menu":
             self.menu_event(event.key)
         else:
-            if event.key == pygame.K_TAB:
+            if event.key in (pygame.K_TAB, pygame.K_t):
                 self.debug = not self.debug
             if event.key == pygame.K_r and self.state in ("win", "lose"):
                 self.state = "menu"
@@ -673,7 +678,7 @@ class Game:
         if p.slow_timer > 0:
             line("Stuck in a cobweb!", (200, 200, 255))
         y += 6
-        line("Tab = AI debug   Esc = quit", (190, 170, 210), self.small_font, 28)
+        line("Tab/T = AI debug   Esc = quit", (190, 170, 210), self.small_font, 28)
 
         if not self.debug:
             return
@@ -751,7 +756,7 @@ class Game:
         hints = [
             "Up/Down: choose     Left/Right: change     Enter: start",
             "In game: WASD or arrows to move (hold to keep walking)",
-            "Collect all the candy, then reach the gate. Press tab to see the AI think.",
+            "Collect all the candy, then reach the gate. Press Tab (or T) to see the AI think.",
         ]
         y = HEIGHT - 120
         for h in hints:
@@ -759,7 +764,7 @@ class Game:
             self.screen.blit(img, img.get_rect(center=(cx, y)))
             y += 28
 
-    def run(self):
+    async def run(self):
         running = True
         while running:
             dt = self.clock.tick(60) / 1000
@@ -770,7 +775,11 @@ class Game:
                     running = False
             self.update(dt)
             self.draw()
+            await asyncio.sleep(0)
         pygame.quit()
 
-if __name__ == "__main__":
-    Game().run()
+async def main():
+    game = Game()
+    await game.run()
+
+asyncio.run(main())

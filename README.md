@@ -10,7 +10,7 @@ A Halloween maze game made with Python and Pygame for A.I. for Game Programming.
 ## Controls
 
 - **WASD or arrow keys:** move (hold to keep walking)
-- **Tab:** turn AI debug mode on/off
+- **Tab or T:** turn AI debug mode on/off
 - **Enter:** start a game from the start screen
 - **R:** back to the start screen after winning or losing
 - **Esc:** quit
